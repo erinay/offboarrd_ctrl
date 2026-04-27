@@ -151,7 +151,6 @@ private:
 
         ocp_nlp_cost_model_set(single_integrator_acados_get_nlp_config(capsule), single_integrator_acados_get_nlp_dims(capsule), nlp_in, N, "yref", yref_e.data());
 
-
         single_integrator_acados_solve(capsule);
 
         Eigen::Vector3d uv_double;
@@ -179,12 +178,13 @@ private:
 
     void mpc_acceleration_reference()
     {
-        rd << 1.0, 1.0, 1.0;
+        rd << 3.0, 4.0, 5.0;
         vd << 0.0, 0.0, 0.0;
         ad << 0.0, 0.0, 0.0; // Acceleration / control desired to be 0
 
         yref <<  rd(0), rd(1), rd(2), vd(0), vd(1), vd(2), ad(0), ad(1), ad(2);
         y << r(0), r(1), r(2), v(0), v(1), v(2);
+        yref_e << rd(0), rd(1), rd(2), vd(0), vd(1), vd(2);
 
         int N = double_integrator_acados_get_nlp_dims(capsule_double)->N; 
 
@@ -200,11 +200,14 @@ private:
             ocp_nlp_cost_model_set(double_integrator_acados_get_nlp_config(capsule_double), double_integrator_acados_get_nlp_dims(capsule_double),
                 nlp_in, i, "yref", yref.data());
         }
-
+        ocp_nlp_cost_model_set(double_integrator_acados_get_nlp_config(capsule_double), double_integrator_acados_get_nlp_dims(capsule_double), nlp_in, N, "yref", yref_e.data());
         double_integrator_acados_solve(capsule_double);
 
+        Eigen::Vector3d ad_double;
         ocp_nlp_out_get(double_integrator_acados_get_nlp_config(capsule_double), double_integrator_acados_get_nlp_dims(capsule_double),
-            nlp_out, 0, "u", ad.data());;
+            nlp_out, 0, "u", ad_double.data());
+
+        ad = ad_double.cast<float>();
 
     }
 

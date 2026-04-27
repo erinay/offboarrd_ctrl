@@ -14,7 +14,7 @@
 
 extern "C" {
     #include "acados_solver_single_integrator.h"
-    #include "acados_solver_soublw_integrator.h"
+    #include "acados_solver_double_integrator.h"
 }
 
 class OffboardAttitude: public rclcpp::Node
@@ -46,11 +46,11 @@ public:
         }
         else if(mpc_type_=="double"){
             std::cout << "Double Integrator MPC running!" << std::endl;
-            capsule_double = soublw_integrator_acados_create_capsule();
-            soublw_integrator_acados_create(capsule_double);
-            nlp_in = soublw_integrator_acados_get_nlp_in(capsule_double);
-            nlp_out = soublw_integrator_acados_get_nlp_out(capsule_double);
-            nlp_solver = soublw_integrator_acados_get_nlp_solver(capsule_double);
+            capsule_double = double_integrator_acados_create_capsule();
+            double_integrator_acados_create(capsule_double);
+            nlp_in = double_integrator_acados_get_nlp_in(capsule_double);
+            nlp_out = double_integrator_acados_get_nlp_out(capsule_double);
+            nlp_solver = double_integrator_acados_get_nlp_solver(capsule_double);
             yref.resize(9);
             y.resize(6);
             yref_e.resize(6);
@@ -186,24 +186,24 @@ private:
         yref <<  rd(0), rd(1), rd(2), vd(0), vd(1), vd(2), ad(0), ad(1), ad(2);
         y << r(0), r(1), r(2), v(0), v(1), v(2);
 
-        int N = soublw_integrator_acados_get_nlp_dims(capsule_double)->N; 
+        int N = double_integrator_acados_get_nlp_dims(capsule_double)->N; 
 
         // Set 'bound' constraint on state
-        ocp_nlp_constraints_model_set(soublw_integrator_acados_get_nlp_config(capsule_double), soublw_integrator_acados_get_nlp_dims(capsule_double),
+        ocp_nlp_constraints_model_set(double_integrator_acados_get_nlp_config(capsule_double), double_integrator_acados_get_nlp_dims(capsule_double),
             nlp_in, nlp_out,  0, "lbx", (void*) y.data());
-        ocp_nlp_constraints_model_set(soublw_integrator_acados_get_nlp_config(capsule_double), soublw_integrator_acados_get_nlp_dims(capsule_double),
+        ocp_nlp_constraints_model_set(double_integrator_acados_get_nlp_config(capsule_double), double_integrator_acados_get_nlp_dims(capsule_double),
             nlp_in, nlp_out, 0, "ubx", (void*) y.data());
         
         // Set reference
         // This loop says that for each stage, the terminal position is where we want to be
         for (int i = 0; i < N; i++) {
-            ocp_nlp_cost_model_set(soublw_integrator_acados_get_nlp_config(capsule_double), soublw_integrator_acados_get_nlp_dims(capsule_double),
+            ocp_nlp_cost_model_set(double_integrator_acados_get_nlp_config(capsule_double), double_integrator_acados_get_nlp_dims(capsule_double),
                 nlp_in, i, "yref", yref.data());
         }
 
-        soublw_integrator_acados_solve(capsule_double);
+        double_integrator_acados_solve(capsule_double);
 
-        ocp_nlp_out_get(soublw_integrator_acados_get_nlp_config(capsule_double), soublw_integrator_acados_get_nlp_dims(capsule_double),
+        ocp_nlp_out_get(double_integrator_acados_get_nlp_config(capsule_double), double_integrator_acados_get_nlp_dims(capsule_double),
             nlp_out, 0, "u", ad.data());;
 
     }
@@ -278,7 +278,7 @@ private:
     std::string mpc_type_; 
 
     single_integrator_solver_capsule* capsule;
-    soublw_integrator_solver_capsule* capsule_double;
+    double_integrator_solver_capsule* capsule_double;
     ocp_nlp_in* nlp_in;
     ocp_nlp_out* nlp_out;
     ocp_nlp_solver* nlp_solver;

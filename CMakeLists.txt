@@ -53,7 +53,7 @@ install(TARGETS offboard_attitude DESTINATION lib/${PROJECT_NAME})
 
 target_link_libraries(offboard_attitude
   "${MPC_CODE_DIR}/libacados_ocp_solver_single_integrator.so"
-  "${MPC_CODE_DIR}/libacados_ocp_solver_soublw_integrator.so"
+  "${MPC_CODE_DIR}/libacados_ocp_solver_double_integrator.so"
   acados
 )
 

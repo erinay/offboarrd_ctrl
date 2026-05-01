@@ -9,8 +9,12 @@
 #include <Eigen/Geometry>
 #include <algorithm>
 
+#include "offboard_attitude.h"
+
 #include <chrono>
 #include <iostream>
+#include <fstream>
+#include <sstream>
 
 extern "C" {
     #include "acados_solver_single_integrator.h"
@@ -73,13 +77,30 @@ public:
     }   
 private:
     
-    void arm()
+    void load_csv(const std::string& filename)
     {
-        publish_vehicle_command(px4_msgs::msg::VehicleCommand::VEHICLE_CMD_COMPONENT_ARM_DISARM, 1.0);
+        std::ifstream file(filename); // open file given filename
+        std::string line;
 
-        RCLCPP_INFO(this->get_logger(), "Arm command send");
+        std::getline(file,line); //gets first line (header) and does not nothing with it
+
+        while(std::getLine(file,line)){
+            std::stringstream ss(line); // cretes "stream" from line, allows us to scan it
+            std::string cell;
+            std::vector<float> values;
+
+            // split line every time it hits comma. and stores in "cell"
+            while(std::getline(ss, cell, ',')){
+                values.push_back(std::stof(cell)); // convert string in cell to double value
+            }
+
+            TrajectoryPoint point;
+            point.t = values[0];
+            point.pos = Eigen::Vector3f(values[1], values[2], values[3]);
+
+            traj.push_back(point); // place into trajectory vector
+        }
     }
-
     void publish_offboard_control_mode()
     {
         px4_msgs::msg::OffboardControlMode msg{};
@@ -266,6 +287,13 @@ private:
         std::cout << "Current Z: " << r.z() << " meters, Thrust: " << thrust << std::endl;
     }
 
+    int closest_index(const vector<TrajectoryPoint>& traj, float t){
+        std::vector<TrajectoryPoint>::iterator it = std::lower_bound(traj.begin(), traj.end(), t);
+        if (it == traj.begin()) return 0;
+        if (it == traj.end()) return traj.size()-1;
+        std::vector<TrajectoryPoint>::iterator prev_it = std::prev(it);
+    }
+
     rclcpp::TimerBase::SharedPtr timer_;
 
     rclcpp::Publisher<px4_msgs::msg::OffboardControlMode>::SharedPtr offboard_control_mode_publisher_;
@@ -279,6 +307,7 @@ private:
     int counter = 0;
     Eigen::Matrix3f R_NED2ENU;
     std::string mpc_type_; 
+    std::vector<TrajectoryPoint> traj;
 
     single_integrator_solver_capsule* capsule;
     double_integrator_solver_capsule* capsule_double;

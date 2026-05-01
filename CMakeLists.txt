@@ -27,6 +27,7 @@ include_directories(
   ${ACADOS_DIR}/include/blasfeo/include
   ${ACADOS_DIR}/include/hpipm/include
   ${MPC_CODE_DIR}
+  src
 )
 
 link_directories(

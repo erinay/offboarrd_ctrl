@@ -37,6 +37,8 @@ public:
                     1, 0, 0,
                     0, 0, -1;
 
+        load_csv("src/offboard_ctrl/trajectory_data/x4caltech_togt_traj.csv");
+
         if(mpc_type_=="single"){
             std::cout << "Single Integrator MPC running!" << std::endl;
             capsule = single_integrator_acados_create_capsule();
@@ -84,7 +86,7 @@ private:
 
         std::getline(file,line); //gets first line (header) and does not nothing with it
 
-        while(std::getLine(file,line)){
+        while(std::getline(file,line)){
             std::stringstream ss(line); // cretes "stream" from line, allows us to scan it
             std::string cell;
             std::vector<float> values;
@@ -149,13 +151,8 @@ private:
     }
 
     void mpc_velocity_reference()
-    {
-        rd << 5.0, 5.0, 5.0;
-        vd << 0.0, 0.0, 0.0;
-
-        yref << rd(0), rd(1), rd(2), vd(0), vd(1), vd(2);
+    {        
         y << r(0), r(1), r(2);
-        yref_e << rd(0), rd(1), rd(2);
 
         int N = single_integrator_acados_get_nlp_dims(capsule)->N;
 
@@ -165,12 +162,37 @@ private:
 
         // Set reference
         // This loop says that for each stage, the terminal position is where we want to be
-        for (int i = 0; i < N; i++) {
-            ocp_nlp_cost_model_set(single_integrator_acados_get_nlp_config(capsule), single_integrator_acados_get_nlp_dims(capsule),
-                nlp_in, i, "yref", yref.data());
-        }
+        for (int i = 0; i <= N; i++) {
+            if(state==START){
+                yref <<  traj[0].pos(0), traj[0].pos(1), traj[0].pos(2), 0.0, 0.0, 0.0;
+                yref_e << traj[0].pos(0), traj[0].pos(1), traj[0].pos(2);
+                if (i<N){
+                    ocp_nlp_cost_model_set(single_integrator_acados_get_nlp_config(capsule), single_integrator_acados_get_nlp_dims(capsule),
+                        nlp_in, i, "yref", yref.data());
+                }
+                else{
+                    yref_e << traj[0].pos(0), traj[0].pos(1), traj[0].pos(2);
+                    ocp_nlp_cost_model_set(single_integrator_acados_get_nlp_config(capsule), single_integrator_acados_get_nlp_dims(capsule), nlp_in, N, "yref", yref_e.data());
+                }
+            }
+            else if (state==TRACK_TRAJ){
+                time_traj += 0.1;
+                float t_k = time_traj + i*dt;
+                int closest_idx = closest_index(t_k);
 
-        ocp_nlp_cost_model_set(single_integrator_acados_get_nlp_config(capsule), single_integrator_acados_get_nlp_dims(capsule), nlp_in, N, "yref", yref_e.data());
+                // Without interpolation
+                yref << traj[closest_idx].pos(0), traj[closest_idx].pos(1), traj[closest_idx].pos(2), 0.0, 0.0, 0.0;
+                
+                if (i<N){
+                    ocp_nlp_cost_model_set(single_integrator_acados_get_nlp_config(capsule), single_integrator_acados_get_nlp_dims(capsule),
+                        nlp_in, i, "yref", yref.data());
+                }
+                else{
+                    yref_e << traj[closest_idx].pos(0), traj[closest_idx].pos(1), traj[closest_idx].pos(2);
+                    ocp_nlp_cost_model_set(single_integrator_acados_get_nlp_config(capsule), single_integrator_acados_get_nlp_dims(capsule), nlp_in, N, "yref", yref_e.data());
+                }
+            }
+        }
 
         single_integrator_acados_solve(capsule);
 
@@ -180,8 +202,6 @@ private:
             nlp_out, 0, "u", uv_double.data());
         uv = uv_double.cast<float>();
         std::cout << "MPC Output: " << uv.transpose() << std::endl;
-        std::cout << "r: " << r.transpose() << std::endl;
-        std::cout << "rd: " << rd.transpose() << std::endl;
         std::cout << "y: " << y.transpose() << std::endl;
         std::cout << "yref: " << yref.transpose() << std::endl;
         std::cout << "uv: " << uv.transpose() << std::endl;
@@ -199,13 +219,9 @@ private:
 
     void mpc_acceleration_reference()
     {
-        rd << 3.0, 4.0, 5.0;
         vd << 0.0, 0.0, 0.0;
         ad << 0.0, 0.0, 0.0; // Acceleration / control desired to be 0
-
-        yref <<  rd(0), rd(1), rd(2), vd(0), vd(1), vd(2), ad(0), ad(1), ad(2);
         y << r(0), r(1), r(2), v(0), v(1), v(2);
-        yref_e << rd(0), rd(1), rd(2), vd(0), vd(1), vd(2);
 
         int N = double_integrator_acados_get_nlp_dims(capsule_double)->N; 
 
@@ -217,11 +233,38 @@ private:
         
         // Set reference
         // This loop says that for each stage, the terminal position is where we want to be
-        for (int i = 0; i < N; i++) {
-            ocp_nlp_cost_model_set(double_integrator_acados_get_nlp_config(capsule_double), double_integrator_acados_get_nlp_dims(capsule_double),
-                nlp_in, i, "yref", yref.data());
+        for (int i = 0; i <= N; i++) {
+            if(state==START){
+                yref <<  traj[0].pos(0), traj[0].pos(1), traj[0].pos(2), vd(0), vd(1), vd(2), ad(0), ad(1), ad(2);
+                yref_e << traj[0].pos(0), traj[0].pos(1), traj[0].pos(2), vd(0), vd(1), vd(2);
+                if (i<N){
+                    ocp_nlp_cost_model_set(double_integrator_acados_get_nlp_config(capsule_double), double_integrator_acados_get_nlp_dims(capsule_double),
+                        nlp_in, i, "yref", yref.data());
+                }
+                else{
+                    yref_e << traj[0].pos(0), traj[0].pos(1), traj[0].pos(2), vd(0), vd(1), vd(2);
+                    ocp_nlp_cost_model_set(double_integrator_acados_get_nlp_config(capsule_double), double_integrator_acados_get_nlp_dims(capsule_double), nlp_in, N, "yref", yref_e.data());
+                }
+            }
+            else if (state==TRACK_TRAJ){
+                time_traj += 0.1;
+                float t_k = time_traj + i*dt;
+                int closest_idx = closest_index(t_k);
+
+                // Without interpolation
+                yref << traj[closest_idx].pos(0), traj[closest_idx].pos(1), traj[closest_idx].pos(2), vd(0), vd(1), vd(2), ad(0), ad(1), ad(2);
+                
+                if (i<N){
+                    ocp_nlp_cost_model_set(double_integrator_acados_get_nlp_config(capsule_double), double_integrator_acados_get_nlp_dims(capsule_double),
+                        nlp_in, i, "yref", yref.data());
+                }
+                else{
+                    yref_e << traj[closest_idx].pos(0), traj[closest_idx].pos(1), traj[closest_idx].pos(2), vd(0), vd(1), vd(2);
+                    ocp_nlp_cost_model_set(double_integrator_acados_get_nlp_config(capsule_double), double_integrator_acados_get_nlp_dims(capsule_double), nlp_in, N, "yref", yref_e.data());
+                }
+            }
         }
-        ocp_nlp_cost_model_set(double_integrator_acados_get_nlp_config(capsule_double), double_integrator_acados_get_nlp_dims(capsule_double), nlp_in, N, "yref", yref_e.data());
+
         double_integrator_acados_solve(capsule_double);
 
         Eigen::Vector3d ad_double;
@@ -260,7 +303,7 @@ private:
     }
 
     void publish_attitude_command()
-    {
+    {   
         if (mpc_type_ == "single"){
             mpc_velocity_reference();
             acceleration_reference();
@@ -285,14 +328,30 @@ private:
         attitude_setpoint_publisher_->publish(msg);
 
         std::cout << "Current Z: " << r.z() << " meters, Thrust: " << thrust << std::endl;
+        
+        //update state machine if neccessary
+        Eigen::Vector3f p_start(traj[0].pos(0), traj[0].pos(1), traj[0].pos(2));
+
+        if ((r-p_start).norm() < 0.08f && state==START){
+            state=TRACK_TRAJ;
+        }
+
+        std::cout << "State" << state << std::endl;
     }
 
-    int closest_index(const vector<TrajectoryPoint>& traj, float t){
-        std::vector<TrajectoryPoint>::iterator it = std::lower_bound(traj.begin(), traj.end(), t);
-        if (it == traj.begin()) return 0;
-        if (it == traj.end()) return traj.size()-1;
-        std::vector<TrajectoryPoint>::iterator prev_it = std::prev(it);
+    int closest_index(float t){
+        // Returns first index when traj[i].t >= t
+        int it = std::lower_bound(traj.begin(), traj.end(), t, 
+            [](const TrajectoryPoint& pt, float val){ return pt.t < val;})-traj.begin();
+        if (it == 0) return 0;
+        if (it == (int)traj.size()) return traj.size()-1;
+        return it;
     }
+
+    enum MPC_state {
+        START,
+        TRACK_TRAJ
+    };
 
     rclcpp::TimerBase::SharedPtr timer_;
 
@@ -303,8 +362,10 @@ private:
 
     bool armed = false;
     float thrust = 0.0;
+    float time_traj = 0.0;
+    int count = 0;
+    MPC_state state = START;
     Eigen::Vector3f r, v;
-    int counter = 0;
     Eigen::Matrix3f R_NED2ENU;
     std::string mpc_type_; 
     std::vector<TrajectoryPoint> traj;
@@ -324,6 +385,7 @@ private:
     const float t_hover = 0.72; // 2kg.
     const float g = 9.81;
     const float mass = 1.0;
+    const float dt = 0.2; 
 };
 
 int main(int argc, char * argv[]){

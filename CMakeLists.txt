@@ -16,6 +16,7 @@ find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(rclpy REQUIRED)
 find_package(px4_ros_com REQUIRED)
+find_package(nav_msgs REQUIRED)
 
 # ======== ACADOS PATHS ========
 set(ACADOS_DIR /home/erina/acados)
@@ -49,8 +50,13 @@ if(BUILD_TESTING)
 endif()
 
 add_executable(offboard_attitude src/offboard_attitude.cpp)
+add_executable(autonomy_controller src/autonomy_controller.cpp)
+add_executable(offboard_follower src/offboard_follower.cpp)
 ament_target_dependencies(offboard_attitude rclcpp px4_msgs px4_ros_com)
-install(TARGETS offboard_attitude DESTINATION lib/${PROJECT_NAME})
+ament_target_dependencies(autonomy_controller rclcpp px4_msgs px4_ros_com nav_msgs)
+ament_target_dependencies(offboard_follower rclcpp px4_msgs geometry_msgs)
+
+install(TARGETS offboard_attitude autonomy_controller offboard_follower DESTINATION lib/${PROJECT_NAME})
 
 target_link_libraries(offboard_attitude
   "${MPC_CODE_DIR}/libacados_ocp_solver_single_integrator.so"

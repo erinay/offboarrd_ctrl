@@ -37,7 +37,10 @@ public:
                     1, 0, 0,
                     0, 0, -1;
 
-        load_csv("src/offboard_ctrl/trajectory_data/x4caltech_togt_traj.csv");
+        load_csv("src/offboard_ctrl/trajectory_data/slow_caltech_togt_traj.csv");
+        std::string filename = "src/offboard_ctrl/data/tracking_" + mpc_type_ + "_D.csv";
+        log_file.open(filename);
+        log_file << "state,t,r_x,r_y,r_z,pd_x,pd_y,pd_z,u_x,u_y,u_z,ud_x,ud_y,ud_z, a_x, a_y, a_z, ad_x, ad_y, ad_z\n";
 
         if(mpc_type_=="single"){
             std::cout << "Single Integrator MPC running!" << std::endl;
@@ -99,6 +102,8 @@ private:
             TrajectoryPoint point;
             point.t = values[0];
             point.pos = Eigen::Vector3f(values[1], values[2], values[3]);
+            point.vel = Eigen::Vector3f(values[8], values[9], values[10]);
+            point.acc = Eigen::Vector3f(values[14], values[15], values[16]);
 
             traj.push_back(point); // place into trajectory vector
         }
@@ -144,7 +149,7 @@ private:
     {
         // Replace with MPC single integrator reference in the future
         const float kp = 2.0;
-        rd << 5.0, 5.0, 5.0;
+        rd << traj[0].pos(0), traj[0].pos(1), traj[0].pos(2);
         vd << 0.0, 0.0, 0.0;
 
         uv = kp*(rd-r) + vd;
@@ -153,7 +158,6 @@ private:
     void mpc_velocity_reference()
     {        
         y << r(0), r(1), r(2);
-
         int N = single_integrator_acados_get_nlp_dims(capsule)->N;
 
         // Make sure I.C. starts at current state
@@ -162,35 +166,20 @@ private:
 
         // Set reference
         // This loop says that for each stage, the terminal position is where we want to be
-        for (int i = 0; i <= N; i++) {
-            if(state==START){
-                yref <<  traj[0].pos(0), traj[0].pos(1), traj[0].pos(2), 0.0, 0.0, 0.0;
-                yref_e << traj[0].pos(0), traj[0].pos(1), traj[0].pos(2);
-                if (i<N){
-                    ocp_nlp_cost_model_set(single_integrator_acados_get_nlp_config(capsule), single_integrator_acados_get_nlp_dims(capsule),
-                        nlp_in, i, "yref", yref.data());
-                }
-                else{
-                    yref_e << traj[0].pos(0), traj[0].pos(1), traj[0].pos(2);
-                    ocp_nlp_cost_model_set(single_integrator_acados_get_nlp_config(capsule), single_integrator_acados_get_nlp_dims(capsule), nlp_in, N, "yref", yref_e.data());
-                }
-            }
-            else if (state==TRACK_TRAJ){
-                time_traj += 0.1;
-                float t_k = time_traj + i*dt;
-                int closest_idx = closest_index(t_k);
+        for (int i=0; i<=N; i++){    
+            float t_k = time_traj + i*dt;
+            int closest_idx = closest_index(t_k);
 
-                // Without interpolation
-                yref << traj[closest_idx].pos(0), traj[closest_idx].pos(1), traj[closest_idx].pos(2), 0.0, 0.0, 0.0;
-                
-                if (i<N){
-                    ocp_nlp_cost_model_set(single_integrator_acados_get_nlp_config(capsule), single_integrator_acados_get_nlp_dims(capsule),
-                        nlp_in, i, "yref", yref.data());
-                }
-                else{
-                    yref_e << traj[closest_idx].pos(0), traj[closest_idx].pos(1), traj[closest_idx].pos(2);
-                    ocp_nlp_cost_model_set(single_integrator_acados_get_nlp_config(capsule), single_integrator_acados_get_nlp_dims(capsule), nlp_in, N, "yref", yref_e.data());
-                }
+            // Without interpolation
+            yref << traj[closest_idx].pos(0), traj[closest_idx].pos(1), traj[closest_idx].pos(2), traj[closest_idx].vel(0), traj[closest_idx].vel(1), traj[closest_idx].vel(2);
+
+            if (i<N){
+                ocp_nlp_cost_model_set(single_integrator_acados_get_nlp_config(capsule), single_integrator_acados_get_nlp_dims(capsule),
+                    nlp_in, i, "yref", yref.data());
+            }
+            else{
+                yref_e << traj[closest_idx].pos(0), traj[closest_idx].pos(1), traj[closest_idx].pos(2);
+                ocp_nlp_cost_model_set(single_integrator_acados_get_nlp_config(capsule), single_integrator_acados_get_nlp_dims(capsule), nlp_in, N, "yref", yref_e.data());
             }
         }
 
@@ -212,7 +201,9 @@ private:
 
         // Replace with MPC double integrator reference in the future
         const float kd = 0.5;
-        vd << 0.0, 0.0, 0.0;
+
+        // Go through these parameters
+        // vd << 0.0, 0.0, 0.0;
 
         ad = kd*(uv-v);
     }
@@ -233,10 +224,10 @@ private:
         
         // Set reference
         // This loop says that for each stage, the terminal position is where we want to be
-        for (int i = 0; i <= N; i++) {
-            if(state==START){
-                yref <<  traj[0].pos(0), traj[0].pos(1), traj[0].pos(2), vd(0), vd(1), vd(2), ad(0), ad(1), ad(2);
-                yref_e << traj[0].pos(0), traj[0].pos(1), traj[0].pos(2), vd(0), vd(1), vd(2);
+        if(state==START){
+            yref <<  traj[0].pos(0), traj[0].pos(1), traj[0].pos(2),  traj[0].vel(0), traj[0].vel(1), traj[0].vel(2), ad(0), ad(1), ad(2);
+            yref_e << traj[0].pos(0), traj[0].pos(1), traj[0].pos(2), vd(0), vd(1), vd(2);
+            for (int i=0; i<=N; i++){
                 if (i<N){
                     ocp_nlp_cost_model_set(double_integrator_acados_get_nlp_config(capsule_double), double_integrator_acados_get_nlp_dims(capsule_double),
                         nlp_in, i, "yref", yref.data());
@@ -246,13 +237,14 @@ private:
                     ocp_nlp_cost_model_set(double_integrator_acados_get_nlp_config(capsule_double), double_integrator_acados_get_nlp_dims(capsule_double), nlp_in, N, "yref", yref_e.data());
                 }
             }
-            else if (state==TRACK_TRAJ){
-                time_traj += 0.1;
+        }
+        else if (state==TRACK_TRAJ){
+            for (int i=0; i<N; i++){
                 float t_k = time_traj + i*dt;
                 int closest_idx = closest_index(t_k);
 
                 // Without interpolation
-                yref << traj[closest_idx].pos(0), traj[closest_idx].pos(1), traj[closest_idx].pos(2), vd(0), vd(1), vd(2), ad(0), ad(1), ad(2);
+                yref << traj[closest_idx].pos(0), traj[closest_idx].pos(1), traj[closest_idx].pos(2), traj[0].vel(0), traj[0].vel(1), traj[0].vel(2),  traj[0].acc(0), traj[0].acc(1), traj[0].acc(2);
                 
                 if (i<N){
                     ocp_nlp_cost_model_set(double_integrator_acados_get_nlp_config(capsule_double), double_integrator_acados_get_nlp_dims(capsule_double),
@@ -264,6 +256,7 @@ private:
                 }
             }
         }
+
 
         double_integrator_acados_solve(capsule_double);
 
@@ -304,15 +297,20 @@ private:
 
     void publish_attitude_command()
     {   
-        if (mpc_type_ == "single"){
+        if (state==START){
+            velocity_reference();
+            acceleration_reference();
+        }
+        else if (mpc_type_=="single"){
             mpc_velocity_reference();
             acceleration_reference();
         }
-        else if(mpc_type_ == "double"){
+        else if (mpc_type_=="double"){
             mpc_acceleration_reference();
         }
         // velocity_reference();
         // acceleration_reference();
+        
         attitude_reference();
         
         px4_msgs::msg::VehicleAttitudeSetpoint msg{};
@@ -331,12 +329,27 @@ private:
         
         //update state machine if neccessary
         Eigen::Vector3f p_start(traj[0].pos(0), traj[0].pos(1), traj[0].pos(2));
+        const float pos_tol = 0.2f;
+        const float vel_tol = 0.05f;
 
-        if ((r-p_start).norm() < 0.08f && state==START){
-            state=TRACK_TRAJ;
+        if ((r - p_start).norm() < pos_tol &&
+            v.norm() < vel_tol &&
+            state == START)
+        {
+            state = TRACK_TRAJ;
+            time_traj = 0.0;
+        }
+        if (state==TRACK_TRAJ){
+            time_traj+=0.1;
         }
 
         std::cout << "State" << state << std::endl;
+
+        // Logging
+        int closest_idx = closest_index(time_traj);
+        log_file<< (state == TRACK_TRAJ ? 1 : 0) << "," <<traj[closest_idx].t << "," << r.x() << "," << r.y() << "," << r.z() << "," << traj[closest_idx].pos(0) << "," << traj[closest_idx].pos(1) << "," << traj[closest_idx].pos(2) << 
+            "," << uv[0] << "," << uv[1] << "," << uv[2] << "," << traj[closest_idx].vel(0) << "," << traj[closest_idx].vel(1) << "," << traj[closest_idx].vel(2) << 
+            "," << ad[0] << "," << ad[1] << "," << ad[2] << "," << traj[closest_idx].acc(0) << "," << traj[closest_idx].acc(1) << "," << traj[closest_idx].acc(2) << "\n";
     }
 
     int closest_index(float t){
@@ -369,6 +382,7 @@ private:
     Eigen::Matrix3f R_NED2ENU;
     std::string mpc_type_; 
     std::vector<TrajectoryPoint> traj;
+    std::ofstream log_file; 
 
     single_integrator_solver_capsule* capsule;
     double_integrator_solver_capsule* capsule_double;
@@ -385,7 +399,7 @@ private:
     const float t_hover = 0.72; // 2kg.
     const float g = 9.81;
     const float mass = 1.0;
-    const float dt = 0.2; 
+    const float dt = 0.1; 
 };
 
 int main(int argc, char * argv[]){

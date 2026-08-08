@@ -6,6 +6,8 @@
 struct TrajectoryPoint{
     float t;
     Eigen::Vector3f pos;
+    Eigen::Vector3f vel;
+    Eigen::Vector3f acc;
 };
 
 #endif

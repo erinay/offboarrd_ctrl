@@ -86,20 +86,38 @@ private:
         vehicle_command_publisher_->publish(msg);
     }
 
-    void position_listener(const px4_msgs::msg::VehicleOdometry::SharedPtr msg)
-    {
+    void position_listener(const px4_msgs::msg::VehicleOdometry::SharedPtr msg) {
         Eigen::Vector3f pos_ned{msg->position[0], msg->position[1], msg->position[2]};
         Eigen::Vector3f vel_ned{msg->velocity[0], msg->velocity[1], msg->velocity[2]};
         Eigen::Quaternionf q_ned{msg->q[0], msg->q[1], msg->q[2], msg->q[3]};
         r = R_NED2ENU * pos_ned;
         v = R_NED2ENU * vel_ned;
-        R = R_NED2ENU * q_ned.toRotationMatrix() * R_FLU2FRD.transpose();
+        R = R_NED2ENU * q_ned.toRotationMatrix() * R_FLU2FRD;// * R_FLU2FRD.transpose();
+        
+        position_listened=true;
+
+        // // Hover test
+        // if (!hover_initialized) {
+        //     rd = r;
+
+        //     // Hold current X/Y and climb to flight altitude.
+        //     rd.z() = flight_alt;
+
+        //     hover_initialized = true;
+
+        //     RCLCPP_INFO(
+        //         this->get_logger(),
+        //         "Hover target initialized: %.2f %.2f %.2f",
+        //         rd.x(), rd.y(), rd.z()
+        //     );
+        // }
     }
 
     void waypoint_callback(geometry_msgs::msg::PoseStamped::SharedPtr msg){
-        r_d.x() = (float)(msg->pose.position.x);
-        r_d.y() = (float)(msg->pose.position.y);
-        r_d.z() = flight_alt;
+        waypoint.x() = static_cast<float>(msg->pose.position.x);
+        waypoint.y() = static_cast<float>(msg->pose.position.y);
+        waypoint.z() = flight_alt;
+        have_waypoint_=true;
     }
 
     void velocity_reference()
@@ -107,19 +125,25 @@ private:
         // Replace with MPC single integrator reference in the future
         const float kp = 2.0;
         vd << 0.0, 0.0, 0.0;
+        rd << r.x(), r.y(), flight_alt;
+
+        if(have_waypoint_ && r.z()>(flight_alt-1.0f)){
+            rd.x() = waypoint.x();
+            rd.y() = waypoint.y();
+        }
+
+        rd.z() = flight_alt;
 
         uv = kp*(rd-r) + vd;
 
-        const float xy_vel = (uv.x()*uv.x()+uv.y()+uv.y());
-        const float z_vel = (uv.z()*uv.z());
-        if(xy_vel>(maximum_xy_speed*maximum_xy_speed)){
-            const float ratio = maximum_xy_speed/xy_vel;
+        const float xy_vel = std::sqrt(uv.x()*uv.x() + uv.y()*uv.y());
+
+        if (xy_vel > maximum_xy_speed) {
+            const float ratio = maximum_xy_speed / xy_vel;
             uv.x() *= ratio;
             uv.y() *= ratio;
         }
-        if(z_vel>(maximum_z_speed*maximum_z_speed)){
-            std::clamp(uv.z(), -maximum_z_speed, maximum_z_speed);
-        }
+        uv.z() = std::clamp(uv.z(), -maximum_z_speed, maximum_z_speed);
     }
 
     void acceleration_reference()
@@ -139,9 +163,18 @@ private:
 
         // Advance the heading setpoint each control cycle to rotate in place.
         // atan2 keeps the value bounded while preserving the equivalent heading.
-        yawd_ = std::atan2(std::sin(yawd_ + yaw_rate_rad_s_ * dt),
-                           std::cos(yawd_ + yaw_rate_rad_s_ * dt));
+        yawd_ = std::atan2(R(1,0), R(0,0));
+        if (r.z() > 0.4f) {
+            const float xy_speed = std::sqrt(uv.x()*uv.x() + uv.y()*uv.y());
+            // yawd_ += 10.0f*M_PI/180.0f;
+            // yawd_ = std::atan2(std::sin(yawd_), std::cos(yawd_));
+            if (xy_speed > 0.05f) {
+                yawd_ = std::atan2(uv.y(), uv.x());
+            }
+        }
         const float yawd = yawd_;
+        std::cout<<yawd<<std::endl;
+        
         Eigen::Vector3f bzd = fd;
         bzd.normalize();
         Eigen::Vector3f byawd{-std::sin(yawd), std::cos(yawd), 0.0};
@@ -154,7 +187,7 @@ private:
         Rd.col(0) = bxd;
         Rd.col(1) = byd;
         Rd.col(2) = bzd;
-        Eigen::Matrix3f Rd_ned = R_NED2ENU.transpose()*Rd*R_NED2ENU; // body and world frame are both in NED
+        Eigen::Matrix3f Rd_ned = R_NED2ENU.transpose()*Rd*R_FLU2FRD.transpose(); // body and world frame are both in NED
         qd = Eigen::Quaternionf(Rd_ned);
 
         float F = fd.dot(R.col(2));
@@ -175,6 +208,9 @@ private:
         msg.q_d[1] = qd.x();
         msg.q_d[2] = qd.y();
         msg.q_d[3] = qd.z();
+        // // PX4 consumes attitude setpoints in NED, whose yaw sign is opposite ENU.
+        // // This feed-forward command therefore matches the rotating q_d target.
+        // msg.yaw_sp_move_rate = -yaw_rate_rad_s_;
         msg.thrust_body[0] = 0.0; // FRD frame [-1,1]
         msg.thrust_body[1] = 0.0;
         msg.thrust_body[2] = thrust;
@@ -193,26 +229,32 @@ private:
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr waypoint_subscriber_;
 
     bool armed = false;
+    bool position_listened = false;
+    bool hover_initialized = false;
+    bool have_waypoint_ = false;
     float thrust = 0.0;
     float yawd_ = 0.0f;
     float yaw_rate_rad_s_ = 0.15f;
     float time_traj = 0.0;
     int count = 0;
-    Eigen::Vector3f r, v, r_d;
+    Eigen::Vector3f r = Eigen::Vector3f::Zero();
+    Eigen::Vector3f waypoint = Eigen::Vector3f::Zero();
+    Eigen::Vector3f v = Eigen::Vector3f::Zero();
     Eigen::Matrix3f R_NED2ENU, R_FLU2FRD;
     std::string mpc_type_; 
     std::ofstream log_file; 
     
     Eigen::Quaternionf qd;
-    Eigen::Matrix3f R;
-    Eigen::Vector3f rd, vd, ad, fd, uv, u_mpc;
+    Eigen::Matrix3f R = Eigen::Matrix3f::Identity();
+    Eigen::Vector3f rd = Eigen::Vector3f::Zero();
+    Eigen::Vector3f vd, ad, fd, uv, u_mpc;
     Eigen::VectorXd yref, y, yref_e;
     
-    const float t_hover = 0.72; // 2kg.
+    const float t_hover = 0.80; // 2kg.
     const float g = 9.81;
     const float mass = 1.0;
     const float dt = 0.1; 
-    const float flight_alt = 1.5;
+    const float flight_alt = 0.5;
     const float maximum_xy_speed = 0.5f;
     const float maximum_z_speed = 0.4f;
 };

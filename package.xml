@@ -20,6 +20,7 @@
   <depend>px4_ros_com</depend>
   <depend>geometry_msgs</depend>
   <depend>sensor_msgs</depend>
+  <depend>nav_msgs</depend>
 
   <depend>launch</depend>
   <depend>launch_testing</depend>

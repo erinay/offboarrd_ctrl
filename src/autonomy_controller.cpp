@@ -296,6 +296,7 @@ class AutonomyController: public rclcpp::Node{
         px4_msgs::msg::VehicleOdometry msg{};
 
         msg.timestamp =  t.sec * 1000000ULL + t.nanosec / 1000ULL;
+        msg.timestamp_sample = msg.timestamp;
 
         // position, velocity, orientation
         msg.position[0] = r.x();

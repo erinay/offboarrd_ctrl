@@ -1,0 +1,4 @@
+# Ignore data and scripts, was for a separate (abandoned) project
+data/
+script/
+trajectory_data/

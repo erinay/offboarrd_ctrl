@@ -19,6 +19,7 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
+#include <vector>
 
 class OffboardAttitude: public rclcpp::Node
 {
@@ -34,6 +35,10 @@ public:
         hover_test_ = this->get_parameter("hover_test").as_bool();
         this->declare_parameter<double>("hover_altitude", flight_alt);
         hover_altitude_ = static_cast<float>(this->get_parameter("hover_altitude").as_double());
+        // Corner-pass radius for path_listener's target advance -- see corner_passed(). Ported
+        // from the same fix in control_node.h (poisson_px4), default matches that node's.
+        this->declare_parameter<double>("waypoint_radius", 1.0);
+        waypoint_radius_ = static_cast<float>(this->get_parameter("waypoint_radius").as_double());
         // Spark is kept available for mapping/debugging, but its mixed
         // registered/IMU-prediction /odometry stream must not affect PX4's
         // estimator or this controller unless explicitly requested.
@@ -81,6 +86,32 @@ public:
         timer_ = this->create_wall_timer(std::chrono::milliseconds(100), timer_callback);
     }   
 private:
+    // True once the vehicle is at or past corner index `c` of a fresh D* path -- either within
+    // waypoint_radius_ of it, or its live position already projects beyond it along the incoming
+    // segment poses[c-1]->poses[c] (a wide turn can clear the corner without ever entering that
+    // radius). Read against the live r, not the path's own poses[0]: D* replans from wherever the
+    // robot was *at plan time*, which can already be stale by the time this message is handled.
+    //
+    // Ported from control_node.h's (poisson_px4) fix for the same corner-stall bug: hard-coding
+    // the target to poses[1] forever meant it never advanced as the vehicle closed in, and this
+    // node's P-control cascade (velocity_reference) fades to ~0 as uv approaches a stationary
+    // target, so the approach stalled at the corner instead of continuing past it. Unlike
+    // control_node.h, this only ports the advance logic (root cause), not its further
+    // waypoint_lookahead extension -- that extension is only safe there because it's gated by a
+    // straight-line CBF chord check, and this node has no CBF/map to check a chord against.
+    bool corner_passed(const std::vector<geometry_msgs::msg::PoseStamped>& poses, std::size_t c){
+        const Eigen::Vector2f corner((float)poses[c].pose.position.x, (float)poses[c].pose.position.y);
+        const Eigen::Vector2f pos(r.x(), r.y());
+        if ((pos - corner).norm() < waypoint_radius_) return true;
+
+        const Eigen::Vector2f prev((float)poses[c-1].pose.position.x, (float)poses[c-1].pose.position.y);
+        const Eigen::Vector2f seg = corner - prev;
+        const float seg_len2 = seg.squaredNorm();
+        if (seg_len2 < 1e-6f) return false; // degenerate segment -- nothing to project onto
+        const float t = (pos - prev).dot(seg) / seg_len2;
+        return t >= 1.0f;
+    }
+
     void path_listener(const nav_msgs::msg::Path::SharedPtr msg){
         if (hover_test_) {
             return;
@@ -90,8 +121,18 @@ private:
             have_waypoint_=false;
             return;
         }
-        waypoint.x() = (float)(msg->poses[1].pose.position.x);
-        waypoint.y() = (float) (msg->poses[1].pose.position.y);
+
+        // D* replans from the current robot pose and republishes the whole path on every message,
+        // so progress needs no persistent waypoint index across callbacks -- skip any corner
+        // already reached/overshot since D* last planned, so the target keeps advancing instead of
+        // sticking to the same (possibly already-passed) corner.
+        std::size_t corner = 1;
+        while (corner + 1 < msg->poses.size() && corner_passed(msg->poses, corner)){
+            ++corner;
+        }
+
+        waypoint.x() = (float)(msg->poses[corner].pose.position.x);
+        waypoint.y() = (float)(msg->poses[corner].pose.position.y);
         waypoint.z() = flight_alt;
 
         have_waypoint_=true;
@@ -230,7 +271,6 @@ private:
             // first vehicle-odometry sample.
             rd = have_prearm_position_ ? prearm_position_ : r;
             rd.z() = hover_altitude_;
-            hover_target_latched_ = true;
 
             RCLCPP_INFO(
                 this->get_logger(),
@@ -239,7 +279,6 @@ private:
         } else if (hover_test_ && !now_armed && armed) {
             // A later arm cycle must use a new pre-arm state rather than a
             // reference from the preceding flight.
-            hover_target_latched_ = false;
             have_prearm_position_ = false;
         }
 
@@ -374,10 +413,10 @@ private:
     bool position_listened = false;
     bool hover_test_ = false;
     bool use_lio_visual_odometry_ = false;
-    bool hover_target_latched_ = false;
     bool have_prearm_position_ = false;
     bool have_waypoint_ = false;
     bool takeoff_complete_ = false;
+    float waypoint_radius_ = 1.0f;
     float thrust = 0.0;
     float yawd_ = 0.0f;
     float yaw_rate_rad_s_ = 0.15f;

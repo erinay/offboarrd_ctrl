@@ -28,21 +28,15 @@ public:
     {
         this->declare_parameter<std::string>("mpc_type", "single");
         mpc_type_ = this->get_parameter("mpc_type").as_string();
-        // Positive values rotate counter-clockwise in the ENU world frame.
         this->declare_parameter<double>("yaw_rate_rad_s", 0.15);
         yaw_rate_rad_s_ = static_cast<float>(this->get_parameter("yaw_rate_rad_s").as_double());
         this->declare_parameter<bool>("hover_test", false);
         hover_test_ = this->get_parameter("hover_test").as_bool();
         this->declare_parameter<double>("hover_altitude", flight_alt);
         hover_altitude_ = static_cast<float>(this->get_parameter("hover_altitude").as_double());
-        // Corner-pass radius for path_listener's target advance -- see corner_passed(). Ported
-        // from the same fix in control_node.h (poisson_px4), default matches that node's.
         this->declare_parameter<double>("waypoint_radius", 1.0);
         waypoint_radius_ = static_cast<float>(this->get_parameter("waypoint_radius").as_double());
-        // Spark is kept available for mapping/debugging, but its mixed
-        // registered/IMU-prediction /odometry stream must not affect PX4's
-        // estimator or this controller unless explicitly requested.
-        this->declare_parameter<bool>("use_lio_visual_odometry", false);
+        this->declare_parameter<bool>("use_lio_visual_odometry", false); // Fast-lio turned off for sim 
         use_lio_visual_odometry_ = this->get_parameter("use_lio_visual_odometry").as_bool();
         R_NED2ENU << 0, 1, 0,
             1, 0, 0,
@@ -78,7 +72,7 @@ public:
         path_subscriber_ = this->create_subscription<nav_msgs::msg::Path>("/dstar_path", qos,
             std::bind(&OffboardAttitude::path_listener, this, std::placeholders::_1));
             
-        auto timer_callback = [this]() -> void {  // <-- capture timer_count by reference
+        auto timer_callback = [this]() -> void {
             publish_offboard_control_mode();
             publish_attitude_command();
         };
@@ -100,6 +94,18 @@ private:
     // waypoint_lookahead extension -- that extension is only safe there because it's gated by a
     // straight-line CBF chord check, and this node has no CBF/map to check a chord against.
     bool corner_passed(const std::vector<geometry_msgs::msg::PoseStamped>& poses, std::size_t c){
+        /**
+         * @brief Checks if the vehicle has passed or gotten close enough to a corner waypoint.
+         * 
+         * Prevents the vehicle from getting stuck trying to hit a tight turn exactly 
+         * by checking both a proximity radius and a projection across the segment boundary.
+         * 
+         * @param poses All waypoints in dstar path
+         * @param c Index of upcoming corner waypoint
+         * @return true If the robot is within the waypoint radius or has structurally crossed past the corner.
+         * @return false If the robot has not yet reached or passed the corner.         
+         */
+
         const Eigen::Vector2f corner((float)poses[c].pose.position.x, (float)poses[c].pose.position.y);
         const Eigen::Vector2f pos(r.x(), r.y());
         if ((pos - corner).norm() < waypoint_radius_) return true;

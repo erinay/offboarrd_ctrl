@@ -13,8 +13,8 @@ find_package(Eigen3 REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(px4_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
-find_package(sensor_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 
 option(BUILD_ACADOS_CONTROLLER
   "Build the ACADOS-based offboard_attitude controller" OFF)
@@ -41,8 +41,10 @@ endif()
 
 add_executable(autonomy_controller src/autonomy_controller.cpp)
 add_executable(offboard_follower src/offboard_follower.cpp)
-ament_target_dependencies(autonomy_controller rclcpp px4_msgs nav_msgs)
-ament_target_dependencies(offboard_follower rclcpp px4_msgs geometry_msgs nav_msgs)
+ament_target_dependencies(autonomy_controller
+  builtin_interfaces rclcpp px4_msgs nav_msgs std_msgs)
+ament_target_dependencies(offboard_follower
+  builtin_interfaces rclcpp px4_msgs geometry_msgs nav_msgs)
 target_link_libraries(offboard_follower Eigen3::Eigen)
 
 install(TARGETS autonomy_controller offboard_follower DESTINATION lib/${PROJECT_NAME})

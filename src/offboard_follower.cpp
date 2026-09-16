@@ -80,19 +80,6 @@ public:
         timer_ = this->create_wall_timer(std::chrono::milliseconds(100), timer_callback);
     }   
 private:
-    // True once the vehicle is at or past corner index `c` of a fresh D* path -- either within
-    // waypoint_radius_ of it, or its live position already projects beyond it along the incoming
-    // segment poses[c-1]->poses[c] (a wide turn can clear the corner without ever entering that
-    // radius). Read against the live r, not the path's own poses[0]: D* replans from wherever the
-    // robot was *at plan time*, which can already be stale by the time this message is handled.
-    //
-    // Ported from control_node.h's (poisson_px4) fix for the same corner-stall bug: hard-coding
-    // the target to poses[1] forever meant it never advanced as the vehicle closed in, and this
-    // node's P-control cascade (velocity_reference) fades to ~0 as uv approaches a stationary
-    // target, so the approach stalled at the corner instead of continuing past it. Unlike
-    // control_node.h, this only ports the advance logic (root cause), not its further
-    // waypoint_lookahead extension -- that extension is only safe there because it's gated by a
-    // straight-line CBF chord check, and this node has no CBF/map to check a chord against.
     bool corner_passed(const std::vector<geometry_msgs::msg::PoseStamped>& poses, std::size_t c){
         /**
          * @brief Checks if the vehicle has passed or gotten close enough to a corner waypoint.
@@ -120,18 +107,16 @@ private:
 
     void path_listener(const nav_msgs::msg::Path::SharedPtr msg){
         if (hover_test_) {
-            return;
+            return; // To test sim flight, before commanding translation
         }
 
         if(msg->poses.size()<=1){
             have_waypoint_=false;
-            return;
+            return; // No more path
         }
 
-        // D* replans from the current robot pose and republishes the whole path on every message,
-        // so progress needs no persistent waypoint index across callbacks -- skip any corner
-        // already reached/overshot since D* last planned, so the target keeps advancing instead of
-        // sticking to the same (possibly already-passed) corner.
+        // No persistent waypoint index across callbacks b/c d* replans from current pos. 
+        // pose[0] = current pos, pose[1] = next corner, unleess passed
         std::size_t corner = 1;
         while (corner + 1 < msg->poses.size() && corner_passed(msg->poses, corner)){
             ++corner;
@@ -293,7 +278,6 @@ private:
 
     void velocity_reference()
     {
-        // Replace with MPC single integrator reference in the future
         const float kp = 1.0;
         vd << 0.0, 0.0, 0.0;
 
@@ -305,13 +289,14 @@ private:
         }
 
         if (hover_test_ || !have_waypoint_ || !takeoff_complete_) {
-            // Before arming, continue publishing benign setpoints so PX4 can
-            // enter Offboard.  Once armed, rd is deliberately never modified
-            // until disarm resets the latch in status_callback().
+            // Before arming, send rd = current position for offboard 
+            // Once armed, rd is set to armed x,y, z = hover
+            // Disarm resets the latch in status_callback().
             rd = have_prearm_position_ ? prearm_position_ : r;
             rd.z() = hover_altitude_;
     
         } else {
+            // once proper alt. reached, flies to d* waypoints (currentlly altitude hold)
             std::cout<<"followign waypoint"<<std::endl;
             rd.x() = waypoint.x();
             rd.y() = waypoint.y();
@@ -332,10 +317,7 @@ private:
 
     void acceleration_reference()
     {   
-        // Replace with MPC double integrator reference in the future
         const float kd = 0.6;
-
-                    // Go through these parameters
         // vd << 0.0, 0.0, 0.0;
 
         ad = kd*(uv-v);

@@ -14,8 +14,6 @@ find_package(geometry_msgs REQUIRED)
 find_package(px4_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
-find_package(rclpy REQUIRED)
-find_package(px4_ros_com REQUIRED)
 find_package(nav_msgs REQUIRED)
 
 option(BUILD_ACADOS_CONTROLLER
@@ -43,7 +41,7 @@ endif()
 
 add_executable(autonomy_controller src/autonomy_controller.cpp)
 add_executable(offboard_follower src/offboard_follower.cpp)
-ament_target_dependencies(autonomy_controller rclcpp px4_msgs px4_ros_com nav_msgs)
+ament_target_dependencies(autonomy_controller rclcpp px4_msgs nav_msgs)
 ament_target_dependencies(offboard_follower rclcpp px4_msgs geometry_msgs nav_msgs)
 target_link_libraries(offboard_follower Eigen3::Eigen)
 
@@ -62,7 +60,7 @@ if(BUILD_ACADOS_CONTROLLER)
     ${ACADOS_DIR}/lib
     ${MPC_CODE_DIR}
   )
-  ament_target_dependencies(offboard_attitude rclcpp px4_msgs px4_ros_com)
+  ament_target_dependencies(offboard_attitude rclcpp px4_msgs)
   target_link_libraries(offboard_attitude
     "${MPC_CODE_DIR}/libacados_ocp_solver_single_integrator.so"
     "${MPC_CODE_DIR}/libacados_ocp_solver_double_integrator.so"
